@@ -53,7 +53,7 @@ app.use(function(req, res, next){
     try {
       var parsedURL = url.parse(longURL);
       if (parsedURL.protocol !== 'http:' && parsedURL.protocol !== 'https:') {
-        throw new Error('Protocol should be http');
+        throw new Error('Protocol should be http or https');
       }
       MongoClient.connect(mongoUrl, function (err, db) {
         if (err) {
@@ -83,34 +83,42 @@ app.use(function(req, res, next){
       res.send(JSON.stringify(response));
     }
   } else {
-    var id = parseInt(req.path.substring(1));
-    if (isNaN(id)) {
-      res.send('Invalid link, the id should be a number');
-    }
-    MongoClient.connect(mongoUrl, function (err, db) {
-      if (err) {
-        db.close();
-        res.send(err.message);
+    var response = {};
+    try {
+      var id = parseInt(req.path.substring(1));
+      if (isNaN(id)) {
+        throw new Error('Invalid link, the id should be a number');
       }
-      var urls = db.collection('urls');
-      urls.findOne({
-        id: id
-      }, function(err, doc) {
+      MongoClient.connect(mongoUrl, function (err, db) {
         if (err) {
-          db.close();
-          res.send(err.message);
+          response.error = err.message;
+          res.send(JSON.stringify(response));
+          return;
         }
-        if (doc !== null) {
+        var urls = db.collection('urls');
+        urls.findOne({
+          id: id
+        }, function(err, doc) {
+          if (err) {
+            response.error = err.message;
+            res.send(JSON.stringify(response));
+            return;
+          }
+          if (doc === null) {
+            response.error = 'Invalid link, no such id';
+            res.send(JSON.stringify(response));
+            return;
+          }
           var longURL = doc.url;
           db.close();
           res.redirect(longURL);
-        } else {
-          db.close();
-          res.send('Invalid link, no such id');
-        }
-        
+        });
       });
-    });
+    } catch (e) {
+      response.error = e.message;
+      res.send(JSON.stringify(response));
+    }
+    
   }
   /*res.status(404);
   res.type('txt').send('Not found');*/
