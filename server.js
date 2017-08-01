@@ -5,23 +5,13 @@
 
 'use strict';
 
+var url = require('url');
+
 var mongodb = require('mongodb');
 
 var MongoClient = mongodb.MongoClient;
 
-var url = process.env.MONGO_URL;
-
-MongoClient.connect(url, function (err, db) {
-  if (err) {
-    console.log('Unable to connect to the mongoDB server. Error:', err);
-  } else {
-    console.log('Connection established to', url);
-
-    // do some work here with the database.
-
-    db.close();
-  }
-});
+var mongoUrl = process.env.MONGO_URL;
 
 var fs = require('fs');
 var express = require('express');
@@ -54,12 +44,76 @@ app.route('/_api/package.json')
 app.route('/')
     .get(function(req, res) {
 		  res.sendFile(process.cwd() + '/views/index.html');
-    })
+    });
 
-// Respond not found to all the wrong routes
 app.use(function(req, res, next){
-  res.status(404);
-  res.type('txt').send('Not found');
+  if (req.path.startsWith('/new/')) {
+    var longURL = req.path.substring(5);
+    var response = {};
+    try {
+      var parsedURL = url.parse(longURL);
+      if (parsedURL.protocol !== 'http:' && parsedURL.protocol !== 'https:') {
+        throw new Error('Protocol should be http');
+      }
+      MongoClient.connect(mongoUrl, function (err, db) {
+        if (err) {
+          throw err;
+        }
+        var urls = db.collection('urls');
+        urls.count(function(err, count) {
+          if (err) {
+            throw err;
+          }
+          urls.insertOne({
+            id: count,
+            url: longURL
+          }, function(err, result) {
+            if (err) {
+              throw err;
+            }
+            response.longURL = longURL;
+            response.shortURL = 'https://cclerger-url-shortener-microservice.glitch.me/' + count;
+            db.close();
+            res.send(JSON.stringify(response));
+          });
+        });
+      });
+    } catch (e) {
+      response.error = e.message;
+      res.send(JSON.stringify(response));
+    }
+  } else {
+    var id = parseInt(req.path.substring(1));
+    if (isNaN(id)) {
+      res.send('Invalid link, the id should be a number');
+    }
+    MongoClient.connect(mongoUrl, function (err, db) {
+      if (err) {
+        db.close();
+        res.send(err.message);
+      }
+      var urls = db.collection('urls');
+      urls.findOne({
+        id: id
+      }, function(err, doc) {
+        if (err) {
+          db.close();
+          res.send(err.message);
+        }
+        if (doc !== null) {
+          var longURL = doc.url;
+          db.close();
+          res.redirect(longURL);
+        } else {
+          db.close();
+          res.send('Invalid link, no such id');
+        }
+        
+      });
+    });
+  }
+  /*res.status(404);
+  res.type('txt').send('Not found');*/
 });
 
 // Error Middleware
